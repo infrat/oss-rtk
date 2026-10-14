@@ -11,6 +11,7 @@
 #include "telnet_service.h"
 #include "web_server.h"
 #include "bridge.h"
+#include "gnss_config.h"
 #include "system_control.h"
 
 // Persistent configuration (edited through the web UI)
@@ -24,6 +25,7 @@ static OtaService ota;
 static TelnetService telnet;
 static RoverWebServer webServer;
 static Bridge bridge;
+static GnssConfig gnssConfig; // LC29H settings from the web UI, borrows the UART per job
 
 // Created from settings.transport. Stays nullptr during the WiFi-only setup
 // window: WiFi and Bluetooth share one radio and most of the heap, so the
@@ -127,7 +129,8 @@ void setup()
     // 2. WiFi + web UI (non-blocking)
     wifi.setShutdownCallback(onWifiShutdown);
     wifi.begin(settings);
-    webServer.begin(&settings, &settingsStore, &wifi, &transport);
+    gnssConfig.begin(&uartHandler);
+    webServer.begin(&settings, &settingsStore, &wifi, &transport, &gnssConfig);
 
     // 3. Initialize UART for GPS
     logPrintln("[Setup] Initializing UART...");
@@ -183,7 +186,14 @@ void loop()
         }
     }
 
-    if (transport)
+    if (gnssConfig.active())
+    {
+        // A module command job owns the UART for a second or two. The bridge
+        // (TCP mode) pauses meanwhile, so no NMEA or client RTCM is mixed into
+        // the command/response exchange. Bluetooth waits for the job too.
+        gnssConfig.loop();
+    }
+    else if (transport)
     {
         // ===== GPS ↔ client bridge (+ status LED) =====
         bridge.loop();

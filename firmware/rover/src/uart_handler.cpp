@@ -9,17 +9,22 @@ UARTHandler::UARTHandler()
 
 bool UARTHandler::begin()
 {
+    // Must come before begin(): once the driver is installed the core refuses
+    // to resize and silently keeps its 256 byte default (~22ms at 115200),
+    // which overflows whenever the loop stalls on BLE notify pacing.
+    if (_serial->setRxBufferSize(UART_RX_BUF_SIZE) != UART_RX_BUF_SIZE && _logCallback)
+    {
+        _logCallback("[UART] WARNING: could not set RX buffer to %d bytes", UART_RX_BUF_SIZE);
+    }
+
     // Initialize UART1 with GPS configuration
     _serial->begin(GPS_BAUD_RATE, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-
-    // Set RX/TX buffer size
-    _serial->setRxBufferSize(UART_BUF_SIZE);
 
     if (_logCallback)
     {
         _logCallback("[UART] Initialized GPS UART");
-        _logCallback("[UART] RX: GPIO%d, TX: GPIO%d, Baud: %d",
-                     GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE);
+        _logCallback("[UART] RX: GPIO%d, TX: GPIO%d, Baud: %d, RX buffer: %d B",
+                     GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE, UART_RX_BUF_SIZE);
     }
 
     return true;

@@ -38,6 +38,7 @@
             <button type="button" class="tab" role="tab" data-tab="status" aria-selected="true">Status</button>
             <button type="button" class="tab" role="tab" data-tab="connection" aria-selected="false">Connection</button>
             <button type="button" class="tab" role="tab" data-tab="wifi" aria-selected="false">WiFi</button>
+            <button type="button" class="tab" role="tab" data-tab="gnss" aria-selected="false">GNSS</button>
         </div>
 
         <!-- ===== Status ===== -->
@@ -177,6 +178,88 @@
                 <p class="hint" id="activeHint"></p>
             </div>
         </section>
+
+        <!-- ===== GNSS (LC29H settings, stored in the module) ===== -->
+        <section class="panel" id="panel-gnss" role="tabpanel" hidden>
+            <div id="gnRebootNote" class="note note-warn" hidden>
+                <div>
+                    <strong>Module reboot needed.</strong> Receiver mode, constellations and position
+                    rate are saved but only take effect after the LC29H restarts.
+                </div>
+                <button type="button" class="btn btn-outline" id="gnRebootNoteBtn">Reboot module</button>
+            </div>
+            <div id="gnError" class="note note-warn" hidden></div>
+
+            <div class="card">
+                <h2>GNSS module</h2>
+                <dl class="rows">
+                    <div><dt>Model</dt><dd id="gnModel">&ndash;</dd></div>
+                    <div><dt>Firmware</dt><dd id="gnVersion" class="mono">&ndash;</dd></div>
+                    <div><dt>State</dt><dd id="gnState">&ndash;</dd></div>
+                </dl>
+            </div>
+
+            <div id="gnForm" hidden>
+                <div class="field" id="gnRcvrField">
+                    <span class="label">Receiver mode</span>
+                    <div class="segmented" role="radiogroup">
+                        <label><input type="radio" name="gnRcvr" value="1"><span>Rover</span></label>
+                        <label><input type="radio" name="gnRcvr" value="2"><span>Base station</span></label>
+                    </div>
+                    <p class="hint" id="gnRcvrHint"></p>
+                </div>
+
+                <div class="field" id="gnCnstField">
+                    <label class="label" for="gnCnst">Constellations</label>
+                    <select class="input" id="gnCnst"></select>
+                    <p class="hint">More systems mean more satellites and usually a faster, steadier RTK fix. Use the ones your correction source provides.</p>
+                </div>
+
+                <div class="field" id="gnRateField">
+                    <label class="label" for="gnRate">Position rate</label>
+                    <select class="input" id="gnRate">
+                        <option value="1000">1 Hz</option>
+                        <option value="500">2 Hz</option>
+                        <option value="200">5 Hz</option>
+                        <option value="100">10 Hz</option>
+                    </select>
+                    <p class="hint" id="gnRateHint"></p>
+                </div>
+
+                <div class="field" id="gnNavField">
+                    <label class="label" for="gnNav">Dynamic model</label>
+                    <select class="input" id="gnNav">
+                        <option value="0">Normal (vehicle)</option>
+                        <option value="1">Pedestrian (walking with a pole)</option>
+                        <option value="4">Stationary (static points)</option>
+                        <option value="5">Drone</option>
+                        <option value="9">Bike</option>
+                    </select>
+                    <p class="hint">Tunes the position filter to how the antenna moves.</p>
+                </div>
+
+                <div class="field" id="gnSbasField">
+                    <label class="check"><input type="checkbox" id="gnSbas"><span>Use SBAS (EGNOS / WAAS)</span></label>
+                    <p class="hint">Improves the fallback position when there are no RTK corrections.</p>
+                </div>
+
+                <div id="gnMsgField">
+                    <h2 class="group">NMEA output</h2>
+                    <div class="msg-grid" id="gnMsgList"></div>
+                    <p class="hint">Turn off what your app does not use to save Bluetooth bandwidth. Survey apps need GGA and usually RMC; GST adds the accuracy estimate where supported.</p>
+                </div>
+
+                <h2 class="group">Module actions</h2>
+                <div class="actions-row">
+                    <button type="button" class="btn btn-outline" data-gnss-op="hot">Hot start</button>
+                    <button type="button" class="btn btn-outline" data-gnss-op="warm">Warm start</button>
+                    <button type="button" class="btn btn-outline" data-gnss-op="cold">Cold start</button>
+                    <button type="button" class="btn btn-outline" data-gnss-op="reboot">Reboot module</button>
+                    <button type="button" class="btn btn-destructive" data-gnss-op="restore">Factory settings</button>
+                </div>
+                <p class="hint">Settings are stored in the LC29H itself, not in the rover. <span id="gnTcpHint"></span></p>
+            </div>
+        </section>
     </div>
 
     <!-- ===== Fixed action bar ===== -->
@@ -190,6 +273,14 @@
             </button>
             <button type="button" class="btn btn-destructive" id="restartBtn" title="Restart device" aria-label="Restart device">
                 <svg class="icon"><use href="#i-power"/></svg>
+            </button>
+        </div>
+        <div class="bar-inner" id="barGnss" hidden>
+            <button type="button" class="btn btn-primary grow" id="gnApplyBtn">
+                <svg class="icon"><use href="#i-save"/></svg>Apply to module
+            </button>
+            <button type="button" class="btn btn-outline" id="gnReadBtn" title="Read from module" aria-label="Read from module">
+                <svg class="icon"><use href="#i-refresh"/></svg>
             </button>
         </div>
         <div class="bar-inner" id="barBusy" hidden>

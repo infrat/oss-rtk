@@ -6,12 +6,13 @@
 #include "logger.h"
 #include "system_control.h"
 
-void RoverWebServer::begin(RoverSettings *settings, SettingsStore *store, WifiManager *wifi, ITransport *const *transport)
+void RoverWebServer::begin(RoverSettings *settings, SettingsStore *store, WifiManager *wifi, ITransport *const *transport, GnssConfig *gnss)
 {
     _settings = settings;
     _store = store;
     _wifi = wifi;
     _transport = transport;
+    _gnss = gnss;
 
     // true = format on first use, so a fresh partition never blocks the boot
     if (!LittleFS.begin(true))
@@ -58,6 +59,20 @@ void RoverWebServer::begin(RoverSettings *settings, SettingsStore *store, WifiMa
                 {
                     _wifi->keepAlive();
                     handleScan(request); });
+
+    _server->on("/api/gnss", HTTP_GET, [this](AsyncWebServerRequest *request)
+                {
+                    _wifi->keepAlive();
+                    handleGnssStatus(request); });
+
+    AsyncCallbackJsonWebHandler *gnssHandler = new AsyncCallbackJsonWebHandler(
+        "/api/gnss", [this](AsyncWebServerRequest *request, JsonVariant &json)
+        {
+            _wifi->keepAlive();
+            handleGnssRequest(request, json); });
+    gnssHandler->setMethod(HTTP_POST);
+    gnssHandler->setMaxContentLength(512);
+    _server->addHandler(gnssHandler);
 
     _server->on("/", HTTP_GET, [](AsyncWebServerRequest *request)
                 {
@@ -296,4 +311,184 @@ void RoverWebServer::handleScan(AsyncWebServerRequest *request)
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
+}
+
+void RoverWebServer::handleGnssStatus(AsyncWebServerRequest *request)
+{
+    GnssStatus s;
+    _gnss->snapshot(s);
+
+    DynamicJsonDocument doc(1024);
+    doc["state"] = gnssJobStateId(s.state);
+    doc["op"] = gnssOpId(s.op);
+    doc["step"] = s.step;
+    doc["steps"] = s.steps;
+    doc["needsReboot"] = s.needsReboot;
+    doc["error"] = s.error;
+
+    // Values are only meaningful after a completed read; -1 = not supported
+    const GnssModuleState &m = s.module;
+    if (m.valid)
+    {
+        JsonObject mod = doc.createNestedObject("module");
+        mod["version"] = m.version;
+        mod["variant"] = m.variant;
+        mod["rcvrMode"] = m.rcvrMode;
+        JsonArray cnst = mod.createNestedArray("constellation");
+        for (int i = 0; i < GNSS_CNST_COUNT; i++)
+            cnst.add(m.constellation[i]);
+        mod["fixIntervalMs"] = m.fixIntervalMs;
+        JsonObject msg = mod.createNestedObject("msg");
+        for (int i = 0; i < GNSS_MSG_COUNT; i++)
+            msg[GNSS_MSG_NAMES[i]] = m.msgRate[i];
+        mod["sbas"] = m.sbas;
+        mod["navMode"] = m.navMode;
+    }
+
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+}
+
+void RoverWebServer::handleGnssRequest(AsyncWebServerRequest *request, JsonVariant &json)
+{
+    JsonObject root = json.as<JsonObject>();
+    if (root.isNull())
+    {
+        sendError(request, 400, "Invalid JSON");
+        return;
+    }
+
+    String opId = root["op"] | "";
+    GnssOp op = GnssOp::None;
+    if (opId == "read")
+        op = GnssOp::Read;
+    else if (opId == "apply")
+        op = GnssOp::Apply;
+    else if (opId == "reboot")
+        op = GnssOp::Reboot;
+    else if (opId == "hot")
+        op = GnssOp::HotStart;
+    else if (opId == "warm")
+        op = GnssOp::WarmStart;
+    else if (opId == "cold")
+        op = GnssOp::ColdStart;
+    else if (opId == "restore")
+        op = GnssOp::Restore;
+    else
+    {
+        sendError(request, 400, "Unknown operation");
+        return;
+    }
+
+    GnssChanges ch;
+    ch.clear();
+
+    if (op == GnssOp::Apply)
+    {
+        // Same limits as the protocol spec; the module has the final word
+        JsonObject set = root["set"];
+        if (set.isNull())
+        {
+            sendError(request, 400, "Nothing to apply");
+            return;
+        }
+        if (set.containsKey("rcvrMode"))
+        {
+            int v = set["rcvrMode"] | -1;
+            if (v != 1 && v != 2)
+            {
+                sendError(request, 400, "Receiver mode must be rover (1) or base (2)");
+                return;
+            }
+            ch.rcvrMode = (int8_t)v;
+        }
+        if (set.containsKey("constellation"))
+        {
+            JsonArray arr = set["constellation"];
+            int enabled = 0;
+            if (arr.isNull() || arr.size() != GNSS_CNST_COUNT)
+            {
+                sendError(request, 400, "Constellation needs 6 flags");
+                return;
+            }
+            for (int i = 0; i < GNSS_CNST_COUNT; i++)
+            {
+                int v = arr[i] | -1;
+                if (v != 0 && v != 1)
+                {
+                    sendError(request, 400, "Constellation flags must be 0 or 1");
+                    return;
+                }
+                ch.constellation[i] = (int8_t)v;
+                enabled += v;
+            }
+            if (enabled == 0)
+            {
+                sendError(request, 400, "Enable at least one constellation");
+                return;
+            }
+        }
+        if (set.containsKey("fixIntervalMs"))
+        {
+            long v = set["fixIntervalMs"] | -1L;
+            if (v != 100 && v != 200 && v != 500 && v != 1000)
+            {
+                sendError(request, 400, "Fix interval must be 100, 200, 500 or 1000 ms");
+                return;
+            }
+            ch.fixIntervalMs = v;
+        }
+        JsonObject msg = set["msg"];
+        if (!msg.isNull())
+        {
+            for (JsonPair kv : msg)
+            {
+                int index = -1;
+                for (int i = 0; i < GNSS_MSG_COUNT; i++)
+                    if (strcmp(kv.key().c_str(), GNSS_MSG_NAMES[i]) == 0)
+                        index = i;
+                int v = kv.value() | -1;
+                if (index < 0 || v < 0 || v > 20)
+                {
+                    sendError(request, 400, "NMEA rates must be 0-20 for known sentences");
+                    return;
+                }
+                ch.msgRate[index] = (int8_t)v;
+            }
+        }
+        if (set.containsKey("sbas"))
+        {
+            int v = set["sbas"] | -1;
+            if (v != 0 && v != 1)
+            {
+                sendError(request, 400, "SBAS must be 0 or 1");
+                return;
+            }
+            ch.sbas = (int8_t)v;
+        }
+        if (set.containsKey("navMode"))
+        {
+            int v = set["navMode"] | -1;
+            if (v != 0 && v != 1 && v != 4 && v != 5 && v != 7 && v != 9)
+            {
+                sendError(request, 400, "Unknown navigation mode");
+                return;
+            }
+            ch.navMode = (int8_t)v;
+        }
+        if (ch.empty())
+        {
+            sendError(request, 400, "Nothing to apply");
+            return;
+        }
+    }
+
+    if (!_gnss->request(op, &ch))
+    {
+        sendError(request, 409, "The GNSS module is busy with another operation");
+        return;
+    }
+    logPrintln("[Web] GNSS %s requested", gnssOpId(op));
+    request->send(202, "application/json", "{\"success\":true}");
 }

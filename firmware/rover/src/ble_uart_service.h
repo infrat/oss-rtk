@@ -53,6 +53,11 @@ private:
     TransportLogCallback _logCallback;
     volatile bool _deviceConnected;
 
+    // ATT MTU negotiated by the current peer. Written from the Bluedroid task,
+    // read by sendData() in the main loop. Kept here instead of asking
+    // BLEServer::getPeerMTU(), whose std::map the BT task mutates concurrently.
+    volatile uint16_t _peerMtu;
+
     // Callback class for connections
     class ServerCallbacks : public BLEServerCallbacks
     {
@@ -62,6 +67,7 @@ private:
 
         void onConnect(BLEServer *pServer) override;
         void onDisconnect(BLEServer *pServer) override;
+        void onMtuChanged(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) override;
 
     private:
         BLEUARTService *_service;

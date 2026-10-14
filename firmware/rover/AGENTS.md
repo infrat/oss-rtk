@@ -109,6 +109,7 @@ src/
   system_control.cpp/h      → deferred restart
   bridge.cpp/h              → GNSS UART ↔ transport, link status LED
   uart_handler.cpp/h        → UART comms with LC29H DA
+  gnss_config.cpp/h         → LC29H configuration jobs ($PQTM / $PAIR) behind /api/gnss
   transport.h               → ITransport interface (no radio stack includes)
   transport_factory.cpp/h   → creates the transport selected in settings
   ble_uart_service.cpp/h    → BLE Nordic UART Service (Bluedroid)
@@ -148,6 +149,15 @@ Everything the UI can change lives in `RoverSettings` (NVS namespace `rover`): t
 | `POST /api/restart`   | Restart without saving                                         |
 | `POST /api/wifi/off`  | End the setup window now (WiFi off, Bluetooth starts)          |
 | `GET /api/wifi/scan`  | Async network scan, poll until `scanning` is false             |
+| `GET /api/gnss`       | LC29H job state/progress + values last read from the module    |
+| `POST /api/gnss`      | Start a module job: `read`, `apply` (+`set`), `reboot`, `hot`, `warm`, `cold`, `restore` |
+
+### LC29H Configuration (GNSS tab)
+
+- **Settings live in the module**, never in `RoverSettings`/NVS: `apply` writes, then `$PQTMSAVEPAR` (+ `$PAIR513` for `$PAIR` settings), then reads everything back. The UI shows only what the module reported.
+- **One job at a time, run from the main loop.** `GnssConfig` owns the UART while `active()`; `main.cpp` then skips the bridge and the setup-window drain. Never write to the GNSS UART from a web handler.
+- **Variant differences** (protocol spec V1.4): DA = RTK at 1 Hz only, BA = RTK + IMU up to 10 Hz. Many `$PAIR` setters (elevation mask, min SNR, search mode) are AA-only. Reads are probes: an `ERROR` / unsupported answer just hides the field.
+- Receiver mode, constellations and fix rate apply only after a module reboot. The firmware uses `$PAIR023`, which is not in the spec. Its effect has not been verified on hardware.
 
 There is **no authentication** on the web API yet, and the default AP is open.
 
@@ -232,8 +242,9 @@ uint8_t buffer[UART_BUF_SIZE];
 ### BLE / Chunking Specific
 
 ```cpp
-// BLE MTU is 185 (iOS max); chunk size 180. Large RTCM messages
-// must be split into BLE_CHUNK_SIZE pieces before notify().
+// We offer MTU 185 (iOS max), but the peer may negotiate less (Android
+// starts at 23). Chunk to min(BLE_CHUNK_SIZE, negotiated MTU - 3), tracked
+// in onMtuChanged(); the stack truncates oversized notifications.
 
 // GOOD: only push to mobile when a client is connected
 if (deviceConnected) {
@@ -328,7 +339,7 @@ board_build.partitions = firmware/rover/partitions.csv
 board_build.filesystem = littlefs
 ```
 
-**⚠️ Flash is tight**: the image uses ~92% of the 1.81MB app slot. Check the size line after adding anything.
+**⚠️ Flash is tight**: the image uses ~93% of the 1.81MB app slot. Check the size line after adding anything.
 
 **⚠️ The web UI must stay small and build-free.** LittleFS is 256KB; the UI is ~55KB of hand-written HTML/CSS/JS styled after the transmitter UI. Do not port the transmitter's React bundle (~800KB).
 
@@ -391,8 +402,12 @@ Factory-default credentials and OTA settings live in `include/config.h`; the WiF
 
 ```cpp
 // BAD: notify() with a frame larger than the negotiated MTU
-// GOOD: split into BLE_CHUNK_SIZE (180B) pieces
+// GOOD: split into min(BLE_CHUNK_SIZE, negotiated MTU - 3) pieces
 ```
+
+### 2b. Resizing the UART buffer after `begin()`
+
+`HardwareSerial::setRxBufferSize()` is ignored once the driver runs (the core keeps its 256 B default). Call it before `begin()`.
 
 ### 3. Changing NUS UUIDs or device name casually
 

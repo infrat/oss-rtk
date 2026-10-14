@@ -3,7 +3,7 @@
 #include "ble_uart_service.h"
 
 BLEUARTService::BLEUARTService()
-    : _pServer(nullptr), _pService(nullptr), _pTxCharacteristic(nullptr), _pRxCharacteristic(nullptr), _dataCallback(nullptr), _logCallback(nullptr), _deviceConnected(false)
+    : _pServer(nullptr), _pService(nullptr), _pTxCharacteristic(nullptr), _pRxCharacteristic(nullptr), _dataCallback(nullptr), _logCallback(nullptr), _deviceConnected(false), _peerMtu(BLE_DEFAULT_MTU)
 {
 }
 
@@ -95,12 +95,15 @@ void BLEUARTService::sendData(const uint8_t *data, size_t length)
 {
     if (_deviceConnected && _pTxCharacteristic && length > 0)
     {
-        // If data is large, split into chunks
+        // A notification carries at most MTU - 3 bytes (ATT opcode + handle).
+        // The stack truncates anything beyond that, so a peer that never raised
+        // the MTU (Android default 23) would get only 20 of every 180 bytes.
+        size_t maxPayload = min((size_t)BLE_CHUNK_SIZE, (size_t)(_peerMtu - 3));
         size_t offset = 0;
 
         while (offset < length)
         {
-            size_t chunkSize = min((size_t)BLE_CHUNK_SIZE, length - offset);
+            size_t chunkSize = min(maxPayload, length - offset);
 
             // Send data chunk via BLE notification
             _pTxCharacteristic->setValue((uint8_t *)(data + offset), chunkSize);
@@ -153,6 +156,8 @@ uint32_t BLEUARTService::getConnectedCount()
 
 void BLEUARTService::ServerCallbacks::onConnect(BLEServer *pServer)
 {
+    // Every link starts at the spec minimum until the peer negotiates
+    _service->_peerMtu = BLE_DEFAULT_MTU;
     _service->_deviceConnected = true;
     if (_service->_logCallback)
     {
@@ -160,9 +165,25 @@ void BLEUARTService::ServerCallbacks::onConnect(BLEServer *pServer)
     }
 }
 
+void BLEUARTService::ServerCallbacks::onMtuChanged(BLEServer *pServer, esp_ble_gatts_cb_param_t *param)
+{
+    uint16_t mtu = param->mtu.mtu;
+    if (mtu < BLE_DEFAULT_MTU)
+    {
+        mtu = BLE_DEFAULT_MTU;
+    }
+    _service->_peerMtu = mtu;
+    if (_service->_logCallback)
+    {
+        _service->_logCallback("[BLE] MTU negotiated: %u (notify payload %u B)",
+                               mtu, (unsigned)min(BLE_CHUNK_SIZE, mtu - 3));
+    }
+}
+
 void BLEUARTService::ServerCallbacks::onDisconnect(BLEServer *pServer)
 {
     _service->_deviceConnected = false;
+    _service->_peerMtu = BLE_DEFAULT_MTU;
     if (_service->_logCallback)
     {
         _service->_logCallback("[BLE] Device disconnected");

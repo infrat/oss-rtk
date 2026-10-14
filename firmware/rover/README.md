@@ -95,6 +95,24 @@ If the rover cannot join the configured network within 10 seconds, it falls back
 
 Adding a new link means implementing `ITransport` (see `src/transport.h`) and adding a branch to `src/transport_factory.cpp`.
 
+### GNSS module settings (GNSS tab)
+
+The GNSS tab configures the LC29H itself with `$PQTM` / `$PAIR` commands (Quectel *LC29H Series & LC79H (AL) GNSS Protocol Specification* V1.4). Settings are saved in the module's own memory (`$PQTMSAVEPAR`), not in the rover. The form always shows what the module reports, and fields the module does not answer for are hidden.
+
+| Setting          | Command                       | Notes                                                        |
+| ---------------- | ----------------------------- | ------------------------------------------------------------ |
+| Receiver mode    | `$PQTMCFGRCVRMODE`            | Rover / base. Base mode turns NMEA off. Applies after reboot |
+| Constellations   | `$PQTMCFGCNST`                | Only the combinations the RTK variants accept. Applies after reboot |
+| Position rate    | `$PQTMCFGFIXRATE`             | 1/2/5/10 Hz on BA (and EA). Editable on DA for testing only (datasheet: 1 Hz). Applies after reboot |
+| Dynamic model    | `$PAIR080`                    | Normal, pedestrian, stationary, drone, bike                  |
+| SBAS             | `$PAIR410`                    | Fallback accuracy without RTK                                |
+| NMEA output      | `$PQTMCFGMSGRATE`             | GGA, RMC, GSA, GSV, VTG, GLL (+ GST, ZDA where supported)    |
+| Hot / warm / cold start | `$PAIR004` / `005` / `006` |                                                         |
+| Factory settings | `$PQTMRESTOREPAR`             | Applies after reboot                                         |
+| Reboot module    | `$PAIR023`                    | Not in the protocol spec, documented by Quectel support. If saved settings still do not show up, power-cycle the rover |
+
+The tab works whenever the web UI does: during the setup window, or all the time with the WiFi (TCP) link. While a command runs (about 1-2 s), the rover pauses the GNSS ↔ TCP bridge. The baud rate stays fixed at 115200.
+
 ## Hardware Components
 
 ## UART Pinout (ESP32 ↔ LC29H DA)
@@ -187,7 +205,8 @@ Day-to-day settings (client link, TCP port, WiFi mode and credentials, setup win
 #define GPS_RX_PIN 25           // GNSS TX → ESP32 RX
 #define GPS_TX_PIN 27           // ESP32 TX → GNSS RX
 #define GPS_BAUD_RATE 115200    // LC29H DA baud rate
-#define UART_BUF_SIZE 1024      // UART buffer (1KB)
+#define UART_BUF_SIZE 1024      // bridge read chunk per loop pass
+#define UART_RX_BUF_SIZE 4096   // UART driver RX buffer (~350ms at 115200)
 ```
 
 ### WiFi/OTA Settings (factory defaults)
@@ -216,9 +235,12 @@ Day-to-day settings (client link, TCP port, WiFi mode and credentials, setup win
 #define BT_DEVICE_NAME "OSSRTK"        // BLE scanner name / BT pairing name
 
 // BLE link only:
-#define BLE_MTU_SIZE 185               // iOS max MTU
-#define BLE_CHUNK_SIZE 180             // Chunk size for large packets
+#define BLE_MTU_SIZE 185               // MTU offered to the phone (iOS max)
+#define BLE_DEFAULT_MTU 23             // until the phone negotiates a larger one
+#define BLE_CHUNK_SIZE 180             // max notify size, capped at negotiated MTU - 3
 ```
+
+Notifications are sized from the MTU the phone actually negotiated (logged as `[BLE] MTU negotiated: ...`). A phone that stays at the default 23 gets 20-byte chunks, which is slower but loses nothing.
 
 ### Status LED
 
@@ -389,6 +411,7 @@ firmware/rover/
 │   ├── system_control.cpp/h     # Deferred restart
 │   ├── bridge.cpp/h             # GNSS UART <-> link, status LED
 │   ├── uart_handler.cpp/h       # UART communication with LC29H DA
+│   ├── gnss_config.cpp/h        # LC29H settings jobs ($PQTM / $PAIR) for the web UI
 │   ├── transport.h              # ITransport interface
 │   ├── transport_factory.cpp/h  # Creates the link selected in settings
 │   ├── ble_uart_service.cpp/h   # BLE NUS (Bluedroid)
@@ -415,9 +438,9 @@ firmware/rover/
 | **Client link**     | BLE NUS (default), BT Classic SPP or WiFi TCP |
 | **BLE Range**       | ~10-15m (-9dBm TX power)                      |
 | **BLE MTU**         | 185 bytes (iOS max)                           |
-| **Data Chunk Size** | 180 bytes (BLE packet); SPP/TCP unchunked     |
+| **Data Chunk Size** | ≤180 bytes (negotiated MTU - 3); SPP/TCP unchunked |
 | **WiFi**            | Setup window after boot (default 30 s)        |
-| **Flash Usage**     | ~1.76MB of a 1.81MB app slot (4MB flash)      |
+| **Flash Usage**     | ~1.77MB of a 1.81MB app slot (4MB flash)      |
 | **Free heap**       | ~125KB in the setup window                    |
 
 ## Contributing

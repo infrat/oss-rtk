@@ -29,6 +29,8 @@
     var statusInFlight = false;
     var lastInteraction = Date.now();
     var scanToken = 0; // invalidates a running scan when the dialog closes
+    var currentTab = 'status';
+    var barState = 'actions';
 
     function $(id) { return document.getElementById(id); }
 
@@ -81,11 +83,15 @@
     // ===== Tabs =====
 
     function showTab(name) {
+        currentTab = name;
         document.querySelectorAll('.tab').forEach(function (tab) {
             var active = tab.dataset.tab === name;
             tab.setAttribute('aria-selected', active ? 'true' : 'false');
             $('panel-' + tab.dataset.tab).hidden = !active;
         });
+        // The GNSS tab has its own actions: they talk to the module, not the rover settings
+        if (barState === 'actions') setBar('actions');
+        if (name === 'gnss' && !gnssLoaded && !busy) runGnss('read');
     }
 
     // ===== Status =====
@@ -283,6 +289,7 @@
 
         clearInvalid();
         updateVisibility();
+        renderGnss(); // the TCP note on the GNSS tab depends on the transport
     }
 
     function clearInvalid() {
@@ -385,7 +392,9 @@
     // ===== Save / restart / reconnect =====
 
     function setBar(state, text) {
-        $('barActions').hidden = state !== 'actions';
+        barState = state;
+        $('barActions').hidden = state !== 'actions' || currentTab === 'gnss';
+        $('barGnss').hidden = state !== 'actions' || currentTab !== 'gnss';
         $('barBusy').hidden = state !== 'busy';
         $('barLost').hidden = state !== 'lost';
         if (text) $('busyText').textContent = text;
@@ -611,6 +620,294 @@
             });
     }
 
+    // ===== GNSS module (LC29H) =====
+    // Settings live in the module itself. The rover runs each request as a
+    // short command job (GET /api/gnss reports progress) and the form always
+    // shows what the module answered, never what was sent.
+
+    var GNSS_POLL_MS = 400;
+    var GNSS_TIMEOUT_MS = 60000;
+    // $PQTMCFGCNST combinations the RTK variants (BA, CA, DA, EA) accept.
+    // Order: GPS, GLONASS, Galileo, BeiDou, QZSS, NavIC.
+    var CNST_OPTIONS = [
+        ['1,1,1,1,1,0', 'GPS + GLONASS + Galileo + BeiDou + QZSS'],
+        ['1,0,1,1,1,0', 'GPS + Galileo + BeiDou + QZSS'],
+        ['1,0,1,0,1,0', 'GPS + Galileo + QZSS'],
+        ['1,0,0,1,1,0', 'GPS + BeiDou + QZSS'],
+        ['1,0,0,1,0,0', 'GPS + BeiDou'],
+        ['1,0,0,0,1,0', 'GPS + QZSS'],
+        ['0,0,0,1,0,0', 'BeiDou'],
+        ['1,0,0,0,0,0', 'GPS']
+    ];
+    var CNST_NAMES = ['GPS', 'GLONASS', 'Galileo', 'BeiDou', 'QZSS', 'NavIC'];
+    var MSG_RATES = [[0, 'Off'], [1, 'Every fix'], [2, 'Every 2nd fix'], [5, 'Every 5th fix'], [10, 'Every 10th fix']];
+    var NAV_MODES = [[0, 'Normal (vehicle)'], [1, 'Pedestrian (walking with a pole)'], [4, 'Stationary (static points)'],
+        [5, 'Drone'], [9, 'Bike']];
+    var FIX_RATES = [[1000, '1 Hz'], [500, '2 Hz'], [200, '5 Hz'], [100, '10 Hz']];
+    var VARIANT_INFO = {
+        AA: 'Standard precision', BA: 'RTK + dead reckoning (IMU)', CA: 'Dead reckoning (IMU)',
+        DA: 'RTK, 1 Hz', EA: 'RTK, up to 10 Hz'
+    };
+    var GNSS_OP_TEXT = {
+        read: 'Reading from module', apply: 'Writing to module', reboot: 'Rebooting module',
+        hot: 'Hot start', warm: 'Warm start', cold: 'Cold start', restore: 'Restoring factory settings'
+    };
+    var GNSS_OP_DONE = {
+        read: 'GNSS settings read from the module',
+        apply: 'Settings saved in the GNSS module',
+        reboot: 'GNSS module rebooted',
+        hot: 'Hot start done',
+        warm: 'Warm start done',
+        cold: 'Cold start done. The first fix takes about 30 s.',
+        restore: 'Factory settings restored. Reboot the module to apply them.'
+    };
+    var GNSS_CONFIRM = {
+        hot: ['Hot start?', 'Restarts positioning with the stored satellite data. The fix drops for a moment.', 'Hot start'],
+        warm: ['Warm start?', 'Discards the ephemeris. The next fix takes about 15 seconds.', 'Warm start'],
+        cold: ['Cold start?', 'Discards time, position and satellite data. The next fix takes about 30 seconds.', 'Cold start'],
+        reboot: ['Reboot GNSS module?', 'Restarts the LC29H so saved settings take effect. If they still do not ' +
+            'show up afterwards, switch the rover off and on.', 'Reboot'],
+        restore: ['Restore factory settings?', 'Resets receiver mode, constellations, position rate and NMEA output ' +
+            'of the LC29H to factory values. They apply after a module reboot.', 'Restore']
+    };
+
+    var gnss = null;        // last GET /api/gnss
+    var gnssModule = null;  // values the form was filled from
+    var gnssBusy = false;   // a job started from this page is running
+    var gnssLoaded = false; // a read was started since the page loaded
+
+    // Fills a <select>; a current value outside the list is kept as an extra
+    // option, so reading and re-applying never changes it by accident
+    function selectOptions(select, options, current, currentLabel) {
+        select.textContent = '';
+        var found = false;
+        options.forEach(function (o) {
+            var el = document.createElement('option');
+            el.value = String(o[0]);
+            el.textContent = o[1];
+            if (String(o[0]) === String(current)) found = true;
+            select.appendChild(el);
+        });
+        if (!found) {
+            var extra = document.createElement('option');
+            extra.value = String(current);
+            extra.textContent = currentLabel || ('Current (' + current + ')');
+            select.appendChild(extra);
+        }
+        select.value = String(current);
+    }
+
+    function cnstLabel(flags) {
+        var names = [];
+        flags.forEach(function (on, i) { if (on > 0) names.push(CNST_NAMES[i]); });
+        return names.join(' + ') + ' (current)';
+    }
+
+    function renderGnss() {
+        var g = gnss;
+        var running = gnssBusy || !!(g && g.state === 'busy');
+
+        if (running) {
+            var steps = g && g.steps ? ' (' + g.step + '/' + g.steps + ')' : '';
+            setValue('gnState', (GNSS_OP_TEXT[g && g.op] || 'Working') + '...' + steps, 'dim');
+        } else if (g && g.state === 'failed') {
+            setValue('gnState', 'Last operation failed');
+        } else if (gnssModule) {
+            setValue('gnState', 'Ready', 'ok');
+        } else {
+            setValue('gnState', 'Not read yet', 'dim');
+        }
+
+        var failed = !running && !!(g && g.state === 'failed');
+        $('gnError').hidden = !failed;
+        $('gnError').textContent = failed ? g.error : '';
+        $('gnRebootNote').hidden = running || !(g && g.needsReboot);
+        $('gnForm').hidden = !gnssModule;
+
+        document.querySelectorAll('#barGnss button, [data-gnss-op], #gnRebootNoteBtn').forEach(function (b) {
+            b.disabled = running;
+        });
+        $('gnApplyBtn').disabled = running || !gnssModule;
+
+        $('gnTcpHint').textContent = config && config.transport === 'tcp'
+            ? 'GNSS data to TCP clients pauses for a moment while the rover talks to the module.'
+            : '';
+    }
+
+    function updateGnssHints() {
+        var base = radioValue('gnRcvr') === '2';
+        $('gnRcvrHint').textContent = base
+            ? 'Base mode turns NMEA off and outputs RTCM corrections instead, so survey apps get no position. ' +
+              'Survey-in and fixed base coordinates are not configured here.'
+            : 'Normal mode for this device: positions out, corrections in.';
+
+        if (gnssModule && gnssModule.variant === 'DA') {
+            $('gnRateHint').textContent = 'Experimental: the datasheet rates the LC29H (DA) at 1 Hz only and the ' +
+                'protocol spec does not list this command for it. The module may reject it or ignore it after a reboot.';
+        } else if (parseInt($('gnRate').value, 10) < 1000) {
+            $('gnRateHint').textContent = 'Above 1 Hz only GGA and RMC follow this rate, GSA and GSV stay at 1 Hz. ' +
+                'Check that your Bluetooth link keeps up.';
+        } else {
+            $('gnRateHint').textContent = 'How often the module computes and reports a position.';
+        }
+    }
+
+    function fillGnss(m) {
+        gnssModule = m;
+
+        var info = VARIANT_INFO[m.variant];
+        setValue('gnModel', m.variant ? 'LC29H (' + m.variant + ')' + (info ? '\n' + info : '') : 'Unknown');
+        setValue('gnVersion', m.version || '\u2013', 'mono');
+
+        $('gnRcvrField').hidden = m.rcvrMode < 1;
+        if (m.rcvrMode > 0) setRadio('gnRcvr', String(m.rcvrMode));
+
+        $('gnCnstField').hidden = m.constellation[0] < 0;
+        if (m.constellation[0] >= 0) {
+            selectOptions($('gnCnst'), CNST_OPTIONS, m.constellation.join(','), cnstLabel(m.constellation));
+        }
+
+        // The datasheet rates the DA at 1 Hz only, but the field stays editable
+        // there for testing. If the module did not report its rate, "Unknown"
+        // is shown and any pick counts as a change.
+        $('gnRateField').hidden = m.fixIntervalMs <= 0 && m.variant !== 'DA';
+        if (m.fixIntervalMs > 0) {
+            selectOptions($('gnRate'), FIX_RATES, m.fixIntervalMs);
+        } else {
+            selectOptions($('gnRate'), FIX_RATES, -1, 'Unknown (module did not report it)');
+        }
+        $('gnRate').disabled = false;
+
+        $('gnNavField').hidden = m.navMode < 0;
+        if (m.navMode >= 0) selectOptions($('gnNav'), NAV_MODES, m.navMode);
+
+        $('gnSbasField').hidden = m.sbas < 0;
+        $('gnSbas').checked = m.sbas === 1;
+
+        // One picker per sentence the module answered for
+        var list = $('gnMsgList');
+        list.textContent = '';
+        var shown = 0;
+        Object.keys(m.msg).forEach(function (name) {
+            if (m.msg[name] < 0) return;
+            var cell = document.createElement('div');
+            var label = document.createElement('label');
+            label.className = 'label';
+            label.htmlFor = 'gnMsg-' + name;
+            label.textContent = name;
+            var select = document.createElement('select');
+            select.className = 'input';
+            select.id = 'gnMsg-' + name;
+            selectOptions(select, MSG_RATES, m.msg[name], 'Every ' + m.msg[name] + ' fixes');
+            cell.appendChild(label);
+            cell.appendChild(select);
+            list.appendChild(cell);
+            shown++;
+        });
+        $('gnMsgField').hidden = shown === 0;
+
+        updateGnssHints();
+    }
+
+    // Only what differs from the last read goes to the module
+    function readGnssForm() {
+        var m = gnssModule;
+        var set = {};
+        var changed = false;
+
+        if (!$('gnRcvrField').hidden) {
+            var rcvr = parseInt(radioValue('gnRcvr'), 10);
+            if (rcvr !== m.rcvrMode) { set.rcvrMode = rcvr; changed = true; }
+        }
+        if (!$('gnCnstField').hidden && $('gnCnst').value !== m.constellation.join(',')) {
+            set.constellation = $('gnCnst').value.split(',').map(Number);
+            changed = true;
+        }
+        if (!$('gnRateField').hidden) {
+            var interval = parseInt($('gnRate').value, 10);
+            if (interval > 0 && interval !== m.fixIntervalMs) { set.fixIntervalMs = interval; changed = true; }
+        }
+        if (!$('gnNavField').hidden) {
+            var nav = parseInt($('gnNav').value, 10);
+            if (nav !== m.navMode) { set.navMode = nav; changed = true; }
+        }
+        if (!$('gnSbasField').hidden) {
+            var sbas = $('gnSbas').checked ? 1 : 0;
+            if (sbas !== m.sbas) { set.sbas = sbas; changed = true; }
+        }
+        var msg = {};
+        var msgChanged = false;
+        Object.keys(m.msg).forEach(function (name) {
+            var el = $('gnMsg-' + name);
+            if (!el || m.msg[name] < 0) return;
+            var rate = parseInt(el.value, 10);
+            if (rate !== m.msg[name]) { msg[name] = rate; msgChanged = true; }
+        });
+        if (msgChanged) { set.msg = msg; changed = true; }
+
+        return changed ? set : null;
+    }
+
+    function applyWarning(set) {
+        var text = 'The changes are written to the LC29H and saved in its memory.';
+        if (set.rcvrMode !== undefined || set.constellation || set.fixIntervalMs !== undefined) {
+            text += ' Receiver mode, constellations and position rate take effect after a module reboot.';
+        }
+        if (set.rcvrMode === 2) {
+            text += ' Base mode stops NMEA output: survey apps will no longer get a position.';
+        }
+        if (set.msg && set.msg.GGA === 0) {
+            text += ' GGA is turned off. Most survey and NTRIP apps need it.';
+        }
+        return text;
+    }
+
+    function runGnss(op, set) {
+        if (gnssBusy) return Promise.resolve();
+        gnssBusy = true;
+        if (op === 'read') gnssLoaded = true;
+        gnss = { state: 'busy', op: op, step: 0, steps: 0, needsReboot: !!(gnss && gnss.needsReboot) };
+        renderGnss();
+
+        var deadline = Date.now() + GNSS_TIMEOUT_MS;
+        function poll() {
+            return api('GET', '/api/gnss', undefined, 4000).then(function (data) {
+                gnss = data;
+                renderGnss();
+                if (data.state !== 'busy') return data;
+                if (Date.now() >= deadline) throw new Error('the module did not finish in time');
+                return sleep(GNSS_POLL_MS).then(poll);
+            });
+        }
+
+        var body = { op: op };
+        if (set) body.set = set;
+        return api('POST', '/api/gnss', body)
+            .then(function () { return sleep(GNSS_POLL_MS).then(poll); })
+            .then(function (data) {
+                // A failed job can still carry values: the ones the module did answer
+                if (data.module) fillGnss(data.module);
+                if (data.state === 'done') {
+                    toast(GNSS_OP_DONE[op] || 'Done');
+                } else {
+                    toast(data.error || 'GNSS operation failed', 'error');
+                }
+            })
+            .catch(function (err) {
+                gnss = { state: 'failed', op: op, error: 'GNSS: ' + err.message, needsReboot: !!(gnss && gnss.needsReboot) };
+                toast('GNSS: ' + err.message, 'error');
+            })
+            .then(function () {
+                gnssBusy = false;
+                renderGnss();
+            });
+    }
+
+    function gnssAction(op) {
+        var c = GNSS_CONFIRM[op];
+        confirmDialog(c[0], c[1], c[2], function () { runGnss(op); });
+    }
+
     // ===== Wiring =====
 
     function init() {
@@ -645,6 +942,25 @@
                 'This will restart the device without saving changes. It will be unavailable for a few seconds.',
                 'Restart', restart);
         });
+
+        $('gnReadBtn').addEventListener('click', function () { runGnss('read'); });
+        $('gnApplyBtn').addEventListener('click', function () {
+            if (!gnssModule) return;
+            var set = readGnssForm();
+            if (!set) {
+                toast('No changes to apply');
+                return;
+            }
+            confirmDialog('Apply to GNSS module?', applyWarning(set), 'Apply', function () { runGnss('apply', set); });
+        });
+        $('gnRebootNoteBtn').addEventListener('click', function () { gnssAction('reboot'); });
+        document.querySelectorAll('[data-gnss-op]').forEach(function (btn) {
+            btn.addEventListener('click', function () { gnssAction(btn.dataset.gnssOp); });
+        });
+        document.querySelectorAll('input[name="gnRcvr"], #gnRate').forEach(function (el) {
+            el.addEventListener('change', updateGnssHints);
+        });
+        renderGnss();
 
         $('finishBtn').addEventListener('click', finishSetup);
         ['pointerdown', 'keydown', 'input'].forEach(function (type) {
