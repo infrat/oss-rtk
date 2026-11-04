@@ -434,7 +434,7 @@ enum class MaintenanceCommand : uint8_t {
 
 struct MaintenanceTelemetry {
     uint32_t uptime_s;
-    uint16_t battery_mv;
+    uint16_t battery_mv;      // BatteryMonitor: AXP192/AXP2101 PMU, ADC fallback; 0 = no cell
     uint32_t rtcm_rx_total;
     uint32_t rtcm_tx_total;
     bool     ntrip_connected;

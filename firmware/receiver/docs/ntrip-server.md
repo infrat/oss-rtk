@@ -126,7 +126,7 @@ The display shows live statistics updated every 500ms:
 
 ```
 ┌────────────────────────────┐
-│ OSS RTCM Receiver          │
+│ OSS RTCM RX         [███ ]=│
 │────────────────────────────│
 │ RX:          2.3/s (1s)    │
 │ Err:              0.5%     │
@@ -141,3 +141,6 @@ The display shows live statistics updated every 500ms:
 | Err   | Error rate (timeouts + CRC failures as % of total)       |
 | WiFi  | Connected WiFi stations / max                            |
 | NTRIP | Authenticated NTRIP clients / max                        |
+
+The battery icon in the header has 4 segments (one per started 25 %); one segment blinks below 10 %.
+See `configuration.md` → Battery Monitoring.

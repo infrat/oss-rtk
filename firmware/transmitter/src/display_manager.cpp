@@ -1,13 +1,16 @@
 #include "display_manager.h"
 #include "oss_splash.h"
+#include "config.h"
+#include "battery_monitor.h"
+#include "display/battery_icon.h"
 
-DisplayManager::DisplayManager() : display(nullptr)
+DisplayManager::DisplayManager() : display(nullptr), batteryMonitor(nullptr)
 {
 }
 
 bool DisplayManager::begin()
 {
-    display = new SSD1306Wire(DISPLAY_ADDRESS, SDA_PIN, SCL_PIN);
+    display = new SSD1306Wire(DISPLAY_ADDRESS, SDA_PIN, SCL_PIN, GEOMETRY_128_64, I2C_ONE, OLED_I2C_FREQUENCY);
 
     if (!display->init())
     {
@@ -29,13 +32,7 @@ void DisplayManager::showStatus(const String &title, const String &message)
         return;
 
     clear();
-    display->setFont(ArialMT_Plain_10);
-
-    // Top line: Header
-    display->drawString(0, 0, "OSS RTCM Transmitter");
-
-    // Underline
-    display->drawLine(0, 12, 128, 12);
+    drawHeader();
 
     // Status message
     display->drawString(0, 20, title + ": " + message);
@@ -49,13 +46,7 @@ void DisplayManager::showError(const String &message)
         return;
 
     clear();
-    display->setFont(ArialMT_Plain_10);
-
-    // Top line: Header
-    display->drawString(0, 0, "OSS RTCM Transmitter");
-
-    // Underline
-    display->drawLine(0, 12, 128, 12);
+    drawHeader();
 
     // Error message
     display->drawString(0, 20, "ERROR: " + message);
@@ -70,13 +61,7 @@ void DisplayManager::showStats(unsigned long received, unsigned long transmitted
         return;
 
     clear();
-    display->setFont(ArialMT_Plain_10);
-
-    // Top line: Header
-    display->drawString(0, 0, "OSS RTCM Transmitter");
-
-    // Underline
-    display->drawLine(0, 12, 128, 12);
+    drawHeader();
 
     // RX and TX counters
     display->drawString(0, 20, "RX: " + String(received));
@@ -102,14 +87,7 @@ void DisplayManager::updateStatsDisplay(SystemState state, uint32_t rxMsgPerSec,
         return;
 
     clear();
-    display->setTextAlignment(TEXT_ALIGN_LEFT);
-    // Title
-    display->setFont(ArialMT_Plain_10);
-    // Top line: Header
-    display->drawString(0, 0, "OSS RTCM Transmitter");
-
-    // Underline
-    display->drawLine(0, 12, 128, 12);
+    drawHeader();
 
     // Status line
     display->setTextAlignment(TEXT_ALIGN_LEFT);
@@ -158,6 +136,22 @@ void DisplayManager::updateStatsDisplay(SystemState state, uint32_t rxMsgPerSec,
     display->drawString(128, 51, ntripConnected ? "OK" : "ERR");
 
     display->display();
+}
+
+/**
+ * @brief Title, separator line and battery icon shared by every text screen.
+ * Leaves font = ArialMT_Plain_10 and alignment = left for the caller.
+ */
+void DisplayManager::drawHeader()
+{
+    display->setFont(ArialMT_Plain_10);
+    display->setTextAlignment(TEXT_ALIGN_LEFT);
+    display->drawString(0, 0, "OSS RTCM TX"); // short title leaves room for the battery icon
+    display->drawLine(0, 12, 128, 12);
+
+    if (batteryMonitor)
+        drawBatteryIcon(*display, batteryMonitor->getStatus(), BATTERY_LOW_PERCENT, millis(),
+                        BATTERY_BLINK_INTERVAL_MS);
 }
 
 void DisplayManager::clear()

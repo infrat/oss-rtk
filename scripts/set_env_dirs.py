@@ -41,6 +41,11 @@ if "include" in cfg:
     env.Append(CPPPATH=[inc_path])
     print(f"[set_env_dirs] CPPPATH += {inc_path}")
 
+# Header-only code shared between firmwares, e.g. #include "display/battery_icon.h"
+shared_path = os.path.join(PROJECT_DIR, "firmware", "shared")
+env.Append(CPPPATH=[shared_path])
+print(f"[set_env_dirs] CPPPATH += {shared_path}")
+
 if "data" in cfg:
     data_path = os.path.join(PROJECT_DIR, cfg["data"])
     # PlatformIO 6 builders read PROJECT_DATA_DIR; PROJECTDATA_DIR is the pre-6 name

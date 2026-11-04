@@ -7,6 +7,7 @@
 #include "ntrip_server.h"
 #include "rtcm_parser.h"
 #include "buzzer.h"
+#include "battery.h"
 
 // Inter-core RTCM queue
 QueueHandle_t rtcmQueue = NULL;
@@ -57,6 +58,9 @@ void networkTask(void *param)
     // Handle WiFi clients
     handleWiFiClients();
 
+    // Battery ADC, rate-limited internally; read by updateDisplay() below
+    updateBattery();
+
     // Update display periodically
     if (millis() - lastDisplayUpdate > DISPLAY_UPDATE_INTERVAL)
     {
@@ -75,6 +79,9 @@ void setup()
 
   // Initialize OLED display with delay
   setupOLED();
+
+  // First battery sample before any screen with a header is drawn
+  setupBattery();
 
   // Show splash screen for 3 seconds
   showSplashScreen();

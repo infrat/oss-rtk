@@ -29,8 +29,18 @@
 #define LORA_SYNC_WORD 0x12
 
 // Battery monitoring (always active, not configurable at runtime)
-#define BATTERY_ADC_PIN         35      // ADC1_CH7 on T-Beam v1.1
-#define BATTERY_SCALE_FACTOR    2.0f    // Voltage divider ratio
+// T-Beam v1.0/v1.1 (AXP192) and v1.2 (AXP2101) measure the cell through the PMU
+// on the OLED I2C bus; the PMU is auto-detected at boot. The ADC path below is
+// only a fallback for boards without a PMU (T-Beam v0.7: VBAT/2 on GPIO35).
+#define PMU_I2C_SDA             21      // shared with the OLED
+#define PMU_I2C_SCL             22
+#define PMU_I2C_ADDRESS         0x34    // AXP192 and AXP2101
+#define OLED_I2C_FREQUENCY      400000  // PMU + OLED share the bus; 400 kHz is safe for both
+#define BATTERY_ADC_PIN         35      // fallback: ADC1_CH7 on T-Beam v0.7
+#define BATTERY_SCALE_FACTOR    2.0f    // fallback: voltage divider ratio
+#define BATTERY_SAMPLE_INTERVAL_MS 1000 // battery read period (then EMA-filtered)
+#define BATTERY_LOW_PERCENT     10      // OLED battery icon blinks below this level
+#define BATTERY_BLINK_INTERVAL_MS 500   // low-battery blink half-period
 
 // Debug Configuration
 #define DEBUG_LORA_PACKETS false

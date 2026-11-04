@@ -49,7 +49,7 @@ Lower priority (1). Shares core with ESP32 WiFi stack (which also runs on Core 0
 2. Broadcasts them to all authenticated NTRIP clients
 3. Accepts new NTRIP client connections
 4. Handles NTRIP protocol (GET requests, source table, mount points)
-5. Updates OLED display with statistics every 500ms
+5. Samples the battery ADC (`updateBattery()`, every 1 s) and updates the OLED display with statistics and the battery icon every 500ms. Only this task touches the battery state, so it needs no lock.
 
 ## Inter-Core Synchronization
 
@@ -108,6 +108,7 @@ checkForPackets() ──► onReceive()
 | WiFi Manager | `wifi_manager.cpp/h` | Access Point setup, client tracking                           |
 | Display      | `display.cpp/h`      | SSD1306 OLED driver, statistics rendering                     |
 | Buzzer       | `buzzer.cpp/h`       | Non-blocking GPIO pulse on valid RTCM frame                   |
+| Battery      | `battery.cpp/h`      | VBAT ADC sampling, filtering, charge level for the OLED icon  |
 | Debug        | `debug.cpp/h`        | Thread-safe Serial logging macros                             |
 | Config       | `config.h`           | All compile-time constants (pins, radio, network, timing)     |
 
@@ -117,6 +118,7 @@ checkForPackets() ──► onReceive()
 setup()
   ├── initDebug()           — Serial + debug mutex
   ├── setupOLED()           — I2C display init
+  ├── setupBattery()        — ADC attenuation + first VBAT sample
   ├── showSplashScreen()    — 3s splash
   ├── setupWiFiHotspot()    — AP mode
   ├── setupNTRIPServer()    — TCP listener on port 2101

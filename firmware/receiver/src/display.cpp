@@ -5,6 +5,8 @@
 #include "ntrip_server.h"
 #include "lora_radio.h"
 #include "oss_splash.h"
+#include "battery.h"
+#include "display/battery_icon.h"
 #include <Wire.h>
 
 // Display Manager Class
@@ -58,12 +60,7 @@ public:
             return;
 
         clear();
-        display->setFont(ArialMT_Plain_10);
-        display->setTextAlignment(TEXT_ALIGN_LEFT);
-
-        // Header with underline
-        display->drawString(0, 0, "OSS RTCM Receiver");
-        display->drawLine(0, 12, 128, 12);
+        drawHeader();
 
         // Line 1: RTCM RX rate + age
         float msgRate = getMessageRate();
@@ -100,12 +97,7 @@ public:
             return;
 
         clear();
-        display->setFont(ArialMT_Plain_10);
-        display->setTextAlignment(TEXT_ALIGN_LEFT);
-
-        // Header with underline
-        display->drawString(0, 0, "LoRa RTCM Gateway");
-        display->drawLine(0, 12, 128, 12);
+        drawHeader();
 
         // Error message
         display->drawString(0, 20, "ERROR:");
@@ -120,6 +112,18 @@ public:
         if (!display)
             return;
         display->clear();
+    }
+
+private:
+    // Title, separator line and battery icon shared by every text screen.
+    // Leaves font = ArialMT_Plain_10 and alignment = left for the caller.
+    void drawHeader()
+    {
+        display->setFont(ArialMT_Plain_10);
+        display->setTextAlignment(TEXT_ALIGN_LEFT);
+        display->drawString(0, 0, "OSS RTCM RX"); // short title leaves room for the battery icon
+        display->drawLine(0, 12, 128, 12);
+        drawBatteryIcon(*display, getBatteryStatus(), BATTERY_LOW_PERCENT, millis(), BATTERY_BLINK_INTERVAL_MS);
     }
 };
 

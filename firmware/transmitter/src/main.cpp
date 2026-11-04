@@ -12,6 +12,7 @@
 #include "rtcm_parser.h"
 #include "lora_transmitter.h"
 #include "display_manager.h"
+#include "battery_monitor.h"
 #include "web_interface_manager.h"
 #include "system_state.h"
 #include "maintenance_manager.h"
@@ -44,6 +45,7 @@ NTRIPClient *ntripClient = nullptr;
 RTCMParser *rtcmParser = nullptr;
 LoRaTransmitter *loraTransmitter = nullptr;
 DisplayManager displayManager;
+BatteryMonitor batteryMonitor; // I2C shared with the OLED: only touch from Core 1 (setup/loop)
 WebInterfaceManager *webInterface = nullptr;
 MaintenanceManager *maintenanceManager = nullptr;
 
@@ -240,8 +242,10 @@ void setup()
     Serial.println(F("Watchdog timers disabled for debugging"));
 #endif
 
-    // Initialize display
+    // Initialize display (also brings up the I2C bus shared with the PMU)
     displayManager.begin();
+    batteryMonitor.begin();
+    displayManager.setBatteryMonitor(&batteryMonitor);
     displayManager.showSplashScreen();
     delay(3000);
 
@@ -445,6 +449,9 @@ void loop()
 {
     yield(); // Feed watchdog
 
+    // Rate-limited internally (BATTERY_SAMPLE_INTERVAL_MS); feeds the OLED icon
+    batteryMonitor.update();
+
     // Update web interface (handles AP timeout)
     webInterface->loop();
 
@@ -524,9 +531,9 @@ void loop()
         tel.ntrip_connected = ntripClient->isConnected();
         tel.wifi_connected  = wifiManager->isConnected();
         tel.free_heap       = esp_get_free_heap_size();
-        // Battery: raw ADC → mV using voltage divider constant from config.h
-        uint16_t rawAdc = analogRead(BATTERY_ADC_PIN);
-        tel.battery_mv = static_cast<uint16_t>((rawAdc / 4095.0f) * 3300.0f * BATTERY_SCALE_FACTOR);
+        // Battery from PMU (or ADC fallback); 0 = no cell, clears the "battery present" flag
+        const BatteryStatus &battery = batteryMonitor.getStatus();
+        tel.battery_mv = battery.present ? battery.voltage_mv : 0;
         maintenanceManager->updateTelemetry(tel);
     }
 

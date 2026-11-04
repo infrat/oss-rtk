@@ -39,6 +39,16 @@
 #define BUZZER_PIN 4
 #define BUZZER_PULSE_US 1000 // Buzzer pulse duration in microseconds
 
+// Battery monitoring: VBAT -> 100k/100k divider -> GPIO35 (ADC1_CH7, works with WiFi on)
+// The board cannot report charging or a missing cell; without a battery the
+// charger output reads as a full cell.
+#define BATTERY_ADC_PIN 35
+#define BATTERY_SCALE_FACTOR 2.0f       // divider ratio
+#define BATTERY_ADC_SAMPLES 16          // conversions averaged per sample
+#define BATTERY_SAMPLE_INTERVAL_MS 1000 // read period (then EMA-filtered)
+#define BATTERY_LOW_PERCENT 10          // OLED battery icon blinks below this level
+#define BATTERY_BLINK_INTERVAL_MS 500   // low-battery blink half-period
+
 // Debug configuration
 #define ENABLE_UART_LOGGING true // Set to false to disable all UART logging
 

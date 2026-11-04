@@ -50,7 +50,23 @@ DIO0  → GPIO 26
 ### OLED Display
 
 - **Type**: SSD1306 128x64
-- **I2C**: GPIO 21 (SDA), GPIO 22 (SCL)
+- **I2C**: GPIO 21 (SDA), GPIO 22 (SCL), 400 kHz (bus shared with the PMU)
+
+### Battery Monitoring
+
+Every text screen shows a battery icon in the top-right corner of the header:
+
+- 4 segments, one per started 25 % (Li-Ion curve, 3.30 V = 0 %, 4.20 V = 100 %)
+- lightning bolt to the left of the icon while charging
+- below `BATTERY_LOW_PERCENT` (10 %) one segment blinks
+- empty outline with a dash when no cell is inserted
+
+`BatteryMonitor` ([battery_monitor.cpp](src/battery_monitor.cpp)) auto-detects the PMU at boot:
+AXP2101 (T-Beam v1.2) or AXP192 (v1.0/v1.1), via [XPowersLib](https://github.com/lewisxhe/XPowersLib).
+The PMU is only read, its power rails are not changed. Boards without a PMU fall back to the VBAT/2 divider
+on `BATTERY_ADC_PIN` (GPIO35), without charge or presence detection. The serial log shows which source was found
+(`✓ Battery monitor: AXP192 PMU`). The same filtered voltage goes into the maintenance telemetry (`battery_mv`).
+Constants are in `include/config.h` (`BATTERY_*`, `PMU_*`).
 
 ## Quick Start
 
@@ -174,6 +190,7 @@ See [lora-protocol.md](../shared/docs/lora-protocol.md) for the complete (shared
 | **RTCMBuffer**      | [rtcm_buffer.h](include/rtcm_buffer.h)                     | Type-based buffering and grouping |
 | **LoRaTransmitter** | [lora_transmitter.cpp](src/lora_transmitter.cpp)           | Fragmentation and transmission    |
 | **DisplayManager**  | [display_manager.cpp](src/display_manager.cpp)             | OLED status screen                |
+| **BatteryMonitor**  | [battery_monitor.cpp](src/battery_monitor.cpp)             | PMU/ADC battery voltage, charging |
 | **WebInterface**    | [web_interface_manager.cpp](src/web_interface_manager.cpp) | AsyncWebServer + REST API         |
 
 ### Timing

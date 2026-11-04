@@ -28,6 +28,22 @@ All compile-time configuration is defined in `include/config.h`.
 | Define       | GPIO | Function                    |
 | ------------ | ---- | --------------------------- |
 | `BUZZER_PIN` | 4    | Buzzer output (active high) |
+| `BATTERY_ADC_PIN` | 35 | VBAT through a 100k/100k divider (ADC1_CH7) |
+
+## Battery Monitoring
+
+The battery icon in the top-right corner of the OLED header shows 4 segments, one per started 25 %.
+Below `BATTERY_LOW_PERCENT` one segment blinks. The voltage is read with `analogReadMilliVolts()`, averaged,
+EMA-filtered and mapped to a percentage with a Li-Ion discharge curve (`firmware/shared/battery/battery_level.h`).
+The LoRa32 cannot detect charging or a missing cell: without a battery, the charger voltage reads as a full cell.
+
+| Define                       | Value   | Description                               |
+| ---------------------------- | ------- | ----------------------------------------- |
+| `BATTERY_SCALE_FACTOR`       | 2.0     | Divider ratio (VBAT = ADC × factor)       |
+| `BATTERY_ADC_SAMPLES`        | 16      | ADC conversions averaged per sample       |
+| `BATTERY_SAMPLE_INTERVAL_MS` | 1000 ms | Sample period (in `networkTask`, Core 0)  |
+| `BATTERY_LOW_PERCENT`        | 10      | Icon blinks below this level              |
+| `BATTERY_BLINK_INTERVAL_MS`  | 500 ms  | Low-battery blink half-period             |
 
 ## LoRa Radio Parameters
 
