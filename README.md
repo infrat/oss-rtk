@@ -1,10 +1,16 @@
-<img width="997" height="503" alt="oss" src="https://github.com/user-attachments/assets/67ef7492-243a-499e-bc8f-06cd4168d6d4" />
+<img width="997" height="503" alt="OSS-RTK – Open Survey System RTK, open-source GNSS RTK rover" src="https://github.com/user-attachments/assets/67ef7492-243a-499e-bc8f-06cd4168d6d4" />
 
-# Open Survey System (OSS)
+# OSS-RTK – Open Survey System RTK
 
-**Open, affordable GNSS RTK platform** that enables centimeter‑level positioning (~10 mm XY / ~50 mm Z) using commodity, readily available modules. OSS aims to democratize survey‑grade measurements by publishing open hardware, firmware, and reference configurations.
+**OSS-RTK (Open Survey System RTK)** is an **open-source, affordable GNSS RTK platform** that enables centimeter‑level positioning (~10 mm XY / ~50 mm Z) using commodity, readily available modules. It combines a DIY **GNSS RTK rover** (Quectel LC29H + ESP32, Bluetooth/BLE/Wi‑Fi to the phone) with an optional **LoRa radio link for NTRIP/RTCM corrections** (ESP32 + SX1276, 433 MHz). OSS-RTK aims to democratize survey‑grade measurements by publishing open hardware, firmware, and reference configurations.
 
-> **Status:** early draft - architecture overview only. Detailed BOMs, Gerbers, STLs, and configuration guides will be added later.
+**What you get:**
+
+- Open-source RTK rover firmware working with mainstream mobile GIS apps (SW Maps, QField, Locus GIS, SurPad, …)
+- LTE/LoRa gateway (NTRIP client → LoRa) and LoRa/Wi‑Fi gateway (LoRa → local NTRIP caster) for areas without mobile internet
+- Hardware files: KiCad PCB, Gerbers, BOMs, STL/STEP enclosure
+
+> **Status:** work in progress. Firmware for all three components is functional; hardware files are available for the rover, documentation is being extended.
 
 ---
 
@@ -136,13 +142,17 @@ The LoRa link is a contract between the two gateways, so its specs live in one c
 
 - [README](firmware/rover/README.md) - overview and configuration
 
+### Hardware
+
+- [Hardware overview](hardware/README.md) - BOMs for the rover, transmitter and receiver; rover KiCad project, Gerbers and STL/STEP enclosure
+
 ---
 
 ## 7) License
 
-- Hardware: CERN OHL‑S v2 _(TBD)_
-- Firmware/Software: Apache‑2.0 or MIT _(TBD)_
-- Docs: CC‑BY‑4.0 _(TBD)_
+- Firmware/Software: [Apache‑2.0](LICENSE)
+- Hardware: CERN‑OHL‑S‑2.0
+- Docs: CC‑BY‑4.0
 
 ---
 

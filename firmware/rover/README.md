@@ -1,8 +1,8 @@
-# Open Survey System (OSS) - RTK Rover Firmware
+# OSS-RTK (Open Survey System RTK) - RTK Rover Firmware
 
 **ESP32 Firmware for GNSS RTK Rover**
 
-This is the main ESP32 firmware for the **Open Survey System (OSS)** - an open-source GNSS RTK rover designed for professional surveying and mapping applications. The firmware bridges the GNSS RTK receiver's UART to iOS/Android devices over **BLE** (Nordic UART Service, default), **Bluetooth Classic SPP** (Android only) or a raw **WiFi TCP** socket. The link and the WiFi settings are chosen in a built-in **web UI** - see [Setup and Web UI](#setup-and-web-ui).
+This is the main ESP32 firmware for the **OSS-RTK (Open Survey System RTK)** - an open-source GNSS RTK rover designed for professional surveying and mapping applications. The firmware bridges the GNSS RTK receiver's UART to iOS/Android devices over **BLE** (Nordic UART Service, default), **Bluetooth Classic SPP** (Android only) or a raw **WiFi TCP** socket. The link and the WiFi settings are chosen in a built-in **web UI** - see [Setup and Web UI](#setup-and-web-ui).
 
 ## Project Overview
 

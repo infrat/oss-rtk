@@ -1,7 +1,7 @@
 # OSS Hardware
 
 Bill of Materials (BOM) and fabrication files for each building block of the
-Open Survey System (OSS).
+OSS-RTK (Open Survey System RTK).
 
 | Component                   | Role                                                   | BOM                                      |
 | --------------------------- | ------------------------------------------------------ | ---------------------------------------- |
