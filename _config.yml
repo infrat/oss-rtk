@@ -1,0 +1,9 @@
+title: OSS-RTK – Open Survey System RTK
+description: Open-source GNSS RTK rover and LoRa NTRIP correction link – centimeter-level positioning from commodity modules (ESP32, Quectel LC29H, SX1276).
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+exclude:
+  - .pio
+  - scripts
